@@ -1706,8 +1706,12 @@ void bch2_dev_alloc_debug_to_text(struct printbuf *out, struct bch_dev *ca)
 
 	memset(nr, 0, sizeof(nr));
 
-	for (unsigned i = 0; i < ARRAY_SIZE(a->open_buckets); i++)
-		nr[a->open_buckets[i].data_type]++;
+	for (unsigned i = 0; i < ARRAY_SIZE(a->open_buckets); i++) {
+		unsigned t = a->open_buckets[i].data_type;
+		barrier(); /* can't READ_ONCE() a bitfield */
+		if (t < BCH_DATA_NR)
+			nr[t]++;
+	}
 
 	bch2_dev_usage_to_text(out, ca, &stats);
 
