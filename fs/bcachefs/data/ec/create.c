@@ -1859,10 +1859,9 @@ int bch2_stripe_repair(struct moving_context *ctxt,
 		if (!IS_ERR_OR_NULL(dev_stripe))
 			mutex_unlock(&dev_stripe->lock);
 
-		if (bch2_err_matches(ret2, BCH_ERR_operation_blocked)) {
-			bch2_wait_on_allocator(trans, req, ret2, &cl);
-			ret2 = bch_err_throw(c, transaction_restart_nested);
-		}
+		if (bch2_err_matches(ret2, BCH_ERR_operation_blocked))
+			ret2 = bch2_wait_on_allocator(trans, req, ret2, &cl) ?:
+			       bch_err_throw(c, transaction_restart_nested);
 		ret2;
 	}));
 

@@ -1943,9 +1943,9 @@ static bool alloc_wait_advanced(struct bch_fs *c, struct alloc_request *req)
 	return false;
 }
 
-void __bch2_wait_on_allocator(struct btree_trans *trans,
-			      struct alloc_request *req,
-			      int err, struct closure *cl)
+int __bch2_wait_on_allocator(struct btree_trans *trans,
+			     struct alloc_request *req,
+			     int err, struct closure *cl)
 {
 	struct bch_fs *c = trans->c;
 	unsigned long until = jiffies + c->opts.allocator_stuck_timeout * HZ;
@@ -1974,16 +1974,24 @@ void __bch2_wait_on_allocator(struct btree_trans *trans,
 		trans_closure_sync(trans, cl);
 
 		/*
+		 * Bail on fatal signal: a SIGKILL on a userspace process
+		 * stuck here would otherwise wait indefinitely, keeping its
+		 * fds open and blocking umount with EBUSY.
+		 */
+		if (fatal_signal_pending(current))
+			return -EINTR;
+
+		/*
 		 * If we're going emergency-RO, bail out: alloc_wait_advanced
 		 * gates on __dev_buckets_free > 1, which won't be true if
 		 * we're shutting down with a draining device — we'd re-park
 		 * and block read_only_work indefinitely.
 		 */
 		if (test_bit(BCH_FS_emergency_ro, &c->flags))
-			return;
+			return 0;
 
 		if (!bch2_err_matches(err, BCH_ERR_bucket_alloc_blocked))
-			return;
+			return 0;
 
 		/*
 		 * freelist_wait is fs-wide, but we only care about the
@@ -1993,13 +2001,13 @@ void __bch2_wait_on_allocator(struct btree_trans *trans,
 		 * full allocator retry.
 		 */
 		if (alloc_wait_advanced(c, req))
-			return;
+			return 0;
 
 		closure_wait(&c->allocator.freelist_wait, cl);
 
 		if (alloc_wait_advanced(c, req)) {
 			bch2_alloc_waiters_unpark(c);
-			return;
+			return 0;
 		}
 	}
 }
